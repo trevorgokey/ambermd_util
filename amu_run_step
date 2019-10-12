@@ -1,0 +1,44 @@
+#!/bin/bash
+b=$1
+e=$2
+[ $e ] || e=$b
+dateformat='+%Y/%m/%d %H:%M:%S'
+timef=`mktemp`
+
+cleanup() {
+    [ -f $timef ] && rm $timef ;
+}
+bail () {
+     cleanup
+     exit 1
+}
+
+trap bail INT
+
+source $AMU_HOME/*.bash
+
+for i in `seq $b $e` ; do
+    cd $i 
+    if [[ $? -ne 0 ]] ; then
+    	echo `date "$dateformat"`" Bailing." 2> /dev/stderr
+	    exit 1
+    fi
+    printf "%s %s Step: % 4d " "`date \"$dateformat\"`" "$(amu_get_project_name /)" "$i"
+    T="$(date +%s%N)"
+    make -s 2> /dev/null
+    r=$?
+    T="$(($(date +%s%N)-T))"
+    S="$((T/1000000000))"
+    M="$((T/1000000))"
+    T=$S
+    t=$(printf "%02d:%02d:%02d:%02d.%03d" "$((T/86400))" "$((T/3600%24))" "$((T/60%60))" "$((T%60))" "$((M/100000))" )
+          
+    cd ..
+    if [[ $r -eq 2 ]] ; then
+    	echo " failed. Bailing. Elapsed: $t" 2> /dev/stderr
+	exit 1
+    elif [[ $r -eq 0 ]] ; then
+    	echo " success. Elapsed: $t"
+    fi
+done
+cleanup

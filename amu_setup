@@ -1,0 +1,72 @@
+#!/bin/bash
+[ $AMU_HOME ] || { echo "AMU_HOME not set. Exiting" ; exit;  }
+source $AMU_HOME/ambermd_util.bash
+
+if [ ! -f settings ] ; then
+    #you nub, no settings, lets load defaults
+    #echo "No settings file in this directory. Using defaults"
+    cat << EOF > settings
+[ "\$AMU_SIM_BIN" ] || AMU_SIM_BIN="pmemd.cuda"
+[ "\$AMU_SIM_EXTRA_ARGS" ] || AMU_SIM_EXTRA_ARGS=""
+EOF
+fi
+source settings
+PROJ=`amu_get_project_name`
+NAME=`amu_get_step`
+
+[ ! -f $PROJ-$NAME.mdout ] && touch $PROJ-$NAME.mdout
+[ ! -f $PROJ-$NAME.rst7 ] && touch $PROJ-$NAME.rst7 
+[ ! -f $PROJ-$NAME.nc ] && touch $PROJ-$NAME.nc   
+[ ! -f $PROJ-$NAME.inf ] && touch $PROJ-$NAME.inf  
+ln -sf $PROJ-$NAME.mdout mdout
+ln -sf $PROJ-$NAME.rst7  inpcrd.rst7
+ln -sf $PROJ-$NAME.nc    mdcrd
+ln -sf $PROJ-$NAME.nc    mdcrd.nc
+ln -sf $PROJ-$NAME.inf   mdinfo
+prev=`printf "%d" $(( NAME - 1 ))`
+cat << EOF > run.com 
+#!/bin/bash
+source ./settings
+err=\$(mktemp)
+\$AMU_SIM_BIN -O \\
+      -p ../inpcrd.parm7 \\
+      -c ../$prev/inpcrd.rst7 \\
+      -r inpcrd.rst7 \\
+      -ref ../$prev/inpcrd.rst7  \$AMU_SIM_EXTRA_ARGS 2>\$err >/dev/null
+code=\$?
+ret=\$(<\$err)
+compl=\$( egrep 'TIMING|FINAL\s*RESULTS' mdout ) 
+if [ "\$ret" ] ; then 
+	# logged an error, so report it and maybe exit
+	d=\`date +"%Y/%m/%d-%R:%S"\`
+	while read line ; do
+		echo "[\${d}] \$line" >>  error.log
+	done < \$err
+	echo "[\${d}] (Return status \${code})" >>  error.log
+else
+	echo "[\${d}] Process died before completing! (Return status \${code})" >>  error.log
+fi
+if [ -z "\$compl" ] ; then
+    echo "[\${d}] Failure. Simulation did not finish." >>  error.log
+	rm \$err
+	exit 1
+fi
+rm \$err
+exit 0
+EOF
+chmod u+x run.com
+cat << EOF > Makefile
+SHELL := /bin/bash -O extglob
+
+default:
+	./run.com
+
+clean:
+	rm -f !(Makefile|mdin|settings|run.com)
+	> mdcrd.nc
+	> mdout
+	> inpcrd.rst7
+	> mdinfo
+	amu_setup
+EOF
+

@@ -1,0 +1,110 @@
+#!/bin/bash
+s=$1
+stride_in_ps=$2
+method=${3:-0}
+
+function usage() {
+   echo "`basename $0` <dir> <stride_in_ps> [0|1]"
+   echo "0 strides to include frame 1 but not the last frame (1..N..stride) (default)"
+   echo "1 strides to include last frame but not first frame (stride..N+1..stride)"
+}
+
+if [ -z "$stride_in_ps" ] ; then
+    usage
+    exit
+fi
+
+[ $s ] || { usage ; exit ; }
+[ -d $s ] || { echo  "dir $s not found. Exiting." ; exit ; }
+
+
+[ $AMU_HOME ] || { echo  "AMU_HOME not set." ; exit ; }
+source $AMU_HOME/ambermd_util.bash
+
+[ "$PROJ" ] || fail "This folder does not seem to be a MD project." 
+
+
+run=`type -p cpptraj`
+[ "$run" ] || fail "cpptraj not found."
+parm=inpcrd.parm7
+[ -f "$parm" ] || fail "inpcrd.parm7 not found"
+
+
+trj=`find . -maxdepth 1 -type d | sed -e "s:^\./::" | sed -n "/^[0-9][0-9]*/p" | sort -n `
+[  "$trj" ] || fail "No traj folders found. Traj folders are number 1..n."
+e=`echo $trj | tr ' ' '\n' | tail -n 1`
+[[ $s -gt $e ]] && fail "Number supplied is greater than observed steps."
+
+processed=""
+for i in `seq $s $s` ; do
+f="$i/inpcrd.rst7"
+steps=""
+md=$i/mdcrd.nc
+mdo=$i/mdout
+[[ `grep -c "4.  RESULTS" $mdo` -gt 0 ]] || { continue ; }
+
+if [ -z "$s" ] ; then
+    s=1
+fi
+
+
+if [ -z "$strp" ] ; then
+:
+fi
+
+interval=`sed -n "s/^.*\<ntwx\>\s\+=\s\+\([1-9][0-9]*\).*$/\1/p" $mdo`
+dt=`sed -n "s/^.*\<dt\>\s\+=\s\+\([0-9]\+\.[0-9]*\).*$/\1/p" $mdo`
+frame_time_ps=""
+newinterval=""
+stride=""
+[ -n "$interval" ] && {
+      frame_time_ps=`echo "scale=10; $interval * $dt" | bc | cut -d'.' -f 1` ;
+      if (( $stride_in_ps <= $frame_time_ps )) ; then
+         echo "ERROR: new stride is not larger than existing. Exiting."
+         exit
+      fi
+#      newinterval=`echo "scale=10; $interval * $stride" | bc | cut -d'.' -f 1`
+      stride=`echo "scale=10; $stride_in_ps / $frame_time_ps" | bc | cut -d'.' -f 1`
+      newinterval=`echo "scale=10; $stride * $interval " | bc | cut -d'.' -f 1`
+      if [[ $newinterval < $interval ]] ; then
+         echo "ERROR: new interval is smaller. Exiting."
+         exit
+      fi
+}
+
+newmd=`mktemp -p /home/system/local/scratch/ --suffix .nc`
+#newmd="mdcrd-clean-${frame_time_ps_name}${strp_name}.nc"
+old="1"
+ncdump -h $md &>/dev/null
+if [[ $? -eq 0 ]] ; then 
+    f="$md"
+    if [ "$method" -eq "0" ] ; then
+        steps="1 99999999 $stride"
+    elif [ "$method" -eq "1" ] ; then
+        steps="$stride 9999999 $stride"
+    fi
+#    old=`ncdump -h $f 2>/dev/null | grep UNLIMITED | egrep -o "[1-9][0-9]*"`
+#    old=`echo "( $old / $stride + ( $old % $stride > 0 ) ) * $stride" | bc`
+fi
+#new=`ncdump -h $i/$newmd 2>/dev/null | grep UNLIMITED | egrep -o "[1-9][0-9]*"`
+#new=$(( new * stride ))
+#[ "$new" ] || new=0
+#[[ $new -eq $old ]] && continue
+in=$(mktemp)
+cat << EOF  > $in
+trajin $f $steps
+trajout $newmd netcdf
+EOF
+oldsize=`du -DBM $i/mdcrd.nc | awk '{print $1}'`
+$run -p inpcrd.parm7 -i $in && {
+   cp $newmd $i/mdcrd.nc && {
+   sed -i "s/\(^.*\<ntwx\>\s*=\s*\)[1-9][0-9]*\(.*$\)/\1${newinterval}\2/" $i/mdin ;
+   sed -i "s/\(^.*\<ntwx\>\s*=\s*\)[1-9][0-9]*\(.*$\)/\1${newinterval}\2/" $mdo ;
+   included="[first, last)"
+   [ "$method" -eq 1 ] && included="(first,last]"
+   echo "[ `date` ] `basename ${0}`: Reduced $i/mdcrd.nc from $frame_time_ps ps to $stride_in_ps ps ($oldsize to `du -DBM $i/mdcrd.nc | awk '{print $1}'`) on the interval $included." >> notes.log ;
+   }
+}
+rm $in
+rm $newmd
+done

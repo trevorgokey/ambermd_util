@@ -1,0 +1,43 @@
+#!/bin/bash
+
+proto="$1"
+idx="$2"
+
+function usage() {
+   echo "`basename $0` <protocol> <idx>"
+}
+
+[ $AMU_HOME ] || { echo  "AMU_HOME not set." ; exit 1 ; }
+source $AMU_HOME/ambermd_util.bash
+
+[ -z $proto ] && { usage ; exit ; }
+[ -z $idx ] && { usage ; exit ; }
+
+d=`dirname $proto`
+
+
+[ -e $proto ] || { echo "Protocol not found or specified. Exiting" > /dev/stderr ; exit 1 ; }
+[ -d $d/$idx ]   || { echo "Step directory not found. Exiting." > /dev/stderr ; exit 1 ; }
+
+proto_done=0
+[ "$(egrep "^\|\s*$idx" $proto )" ] && proto_done=1
+
+
+dt=$( cd $d/$idx && printf %d "$( amu_trj_get_dt  mdout mdcrd.nc 1 | awk '{print $1}' )" )
+T=$( cd $d/$idx && printf %d "$( amu_trj_get_len mdout mdcrd.nc 1 | awk '{print $1}' )" )
+if [ -z "$dt" ] || [ $dt -eq 0 ] ; 
+then
+    exit -1
+fi
+numframes=$(( T / dt ))
+
+nstlim=$(sed -n 's/nstlim\s*=\s*\([1-9][0-9]*\)/\1/p'  $d/$idx/mdin )
+ntwx=$(sed -n 's/ntwx\s*=\s*\([1-9][0-9]*\)/\1/p'  $d/$idx/mdin )
+expected_frames=$(( nstlim / ntwx ))
+
+if [ "$proto_done" -eq 1 ] && [ $expected_frames -eq $numframes ] ; then
+    exit 0
+else
+    exit 1
+fi
+

@@ -1,0 +1,41 @@
+#!/bin/bash
+mdo=${1:-mdout}
+md=${2:-mdcrd.nc}
+unit=${3:-10}
+
+function usage() {
+   echo "usage:"
+   echo "`basename $0` [mdout] [mdcrd.nc] [unit_in_ps]"
+   echo "default unit of output is 10 ps"
+}
+
+[ $AMU_HOME ] || { echo  "AMU_HOME not set." ; exit ; }
+source $AMU_HOME/ambermd_util.bash
+
+
+for file in $mdo $md ; do 
+if [ ! -f "$file" ] ; then
+    echo "`basename ${0}` error: file `readlink -m $file` not found." >&2
+    usage
+    exit 1
+fi
+done
+
+interval=`sed -n "s/^.*\<ntwx\>\s\+=\s\+\([1-9][0-9]*\).*$/\1/p" $mdo`
+dt=`sed -n "s/^.*\<dt\>\s\+=\s\+\([0-9]\+\.[0-9]*\).*$/\1/p" $mdo`
+frame_time_unit=""
+newinterval=""
+stride=""
+if [ -n "$interval" ] ; then
+      frame_time_unit=`python3 -c "print( int($interval * $dt / $unit) )"`
+      if [ `python3 -c "if $frame_time_unit > 0: print(1)"` ] ; then 
+#        frame_time_unit=$(echo "$frame_time_unit" | cut -d'.' -f 1 )
+        echo "$frame_time_unit * $unit ps" 
+      else
+        echo "`basename ${0}` error: dt == 0. Malformed mdout file: `readlink -m $mdo`" >&2
+        exit 1
+      fi
+else
+    echo "`basename ${0}` error: interval == 0 or missing. Malformed mdout file: `readlink -m $mdo`" >&2
+    exit 1
+fi

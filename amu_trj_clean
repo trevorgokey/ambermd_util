@@ -1,0 +1,134 @@
+#!/bin/bash
+s=$1
+stride=$2
+strp=$3
+raw=$4
+
+function usage() {
+   echo "`basename $0` <dir> <stride> <mask>"
+}
+
+[ $s ] || { usage ; exit ; }
+
+[ $AMU_HOME ] || { echo  "AMU_HOME not set." ; exit ; }
+source $AMU_HOME/ambermd_util.bash
+
+[ "$PROJ" ] || fail "This folder does not seem to be a MD project." 
+
+
+run=`type -p cpptraj`
+[ "$run" ] || fail "cpptraj not found."
+parm=inpcrd.parm7
+[ -f "$parm" ] || fail "inpcrd.parm7 not found"
+
+
+trj=`find . -maxdepth 1 -type d | sed -e "s:^\./::" | sed -n "/^[0-9][0-9]*/p" | sort -n `
+[  "$trj" ] || fail "No traj folders found. Traj folders are number 1..n."
+e=`echo $trj | tr ' ' '\n' | tail -n 1`
+[[ $s -gt $e ]] && fail "Number supplied is greater than observed steps."
+
+processed=""
+for i in `seq $s $s` ; do
+f="$i/inpcrd.rst7"
+steps=""
+md=$i/mdcrd.nc
+mdo=$i/mdout
+[[ `grep -c "4.  RESULTS" $mdo` -gt 0 ]] || { continue ; }
+
+if [ -z "$s" ] ; then
+    s=1
+fi
+
+if [ -z "$stride" ] ; then
+    stride=1
+fi
+
+if [ -z "$strp" ] ; then
+:
+elif [ "$strp" == "all" ] ; then
+	strp=""
+fi
+
+interval=`sed -n "s/^.*\<ntwx\>\s\+=\s\+\([1-9][0-9]*\).*$/\1/p" $mdo`
+dt=`sed -n "s/^.*\<dt\>\s\+=\s\+\([0-9]\+\.[0-9]*\).*$/\1/p" $mdo`
+frame_time_ps_name="0_ps-"
+frame_time_ps=""
+[ -n "$interval" ] && {
+      frame_time_ps=`echo "scale=10; $interval * $dt * $stride" | bc | cut -d'.' -f 1` ;
+      frame_time_ps_name="${frame_time_ps}_ps-" ;
+}
+dostrip=""
+strp_name="all"
+doparmstrp=""
+newparm=""
+[ "$strp" ] && { 
+   dostrip="strip $strp" ; 
+   strp_name="${strp}_rm" ; 
+   newparm="inpcrd-${strp_name}.parm7" ;
+   newinp="inpcrd-${strp_name}.rst7" ;
+   [ -f "$newparm" ] || doparmwr="parmwrite out $newparm" ;
+   [ -f "$newparm" ] || doparmstrp="parmstrip $strp" ;
+}
+if [[ "$raw" ]]; then
+	newmd="mdcrd-raw-${frame_time_ps_name}${strp_name}.nc"
+else
+	newmd="mdcrd-clean-${frame_time_ps_name}${strp_name}.nc"
+fi
+old="1"
+ncdump -h $md &>/dev/null
+if [[ $? -eq 0 ]] ; then 
+    f="$md"
+    steps="1 99999999 $stride"
+    old=`ncdump -h $f 2>/dev/null | grep UNLIMITED | egrep -o "[1-9][0-9]*"`
+    old=`echo "( $old / $stride + ( $old % $stride > 0 ) ) * $stride" | bc`
+fi
+new=`ncdump -h $i/$newmd 2>/dev/null | grep UNLIMITED | egrep -o "[1-9][0-9]*"`
+new=$(( new * stride ))
+[ "$new" ] || new=0
+[[ $new -eq $old ]] && continue
+in=$(mktemp)
+mask='@CA'
+#if no CA just do all
+if [ ! "`egrep -m 1 '\<CA\>' inpcrd.parm7`" ] ; then
+    mask=":*"
+fi
+if [[ "$raw" ]]; then
+	cat << EOF  > $in
+	trajin $f $steps
+	center $mask
+	image familiar
+	$dostrip
+	trajout $i/$newmd netcdf
+EOF
+else
+	cat << EOF  > $in
+	trajin $f $steps
+	reference 0/inpcrd.rst7
+	center $mask
+	image center familiar
+	rms reference $mask
+	$dostrip
+	trajout $i/$newmd netcdf
+EOF
+fi
+$run -p inpcrd.parm7 -i $in
+
+[ "$doparmstrp" ] && {
+   cat << EOF > $in 
+$doparmstrp
+$doparmwr
+EOF
+$run -p inpcrd.parm7 -i $in ;
+}
+[ "$doparmstrp" ] && {
+   cat << EOF > $in
+trajin 0/inpcrd.rst7
+$dostrip
+trajout $newinp rstrt
+EOF
+$run -p inpcrd.parm7 $in ; }
+[ "$processed" ] && processed="${processed} "
+processed="${processed}${s}"
+rm $in
+done
+echo "Updated steps ${processed}. Done."

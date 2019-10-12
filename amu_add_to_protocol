@@ -1,0 +1,81 @@
+#!/bin/bash
+protocol=
+mdin=
+to=
+
+me=amu_add_protocol
+
+function usage 
+{
+    echo "$me <[-p|--protocol file> [-m|--mdin file] [-t|--to num]"
+}
+
+ARGS=$(getopt -o 'm:p:t:' --long 'mdin:,protocol:,to:' -n "${me}" -- "$@")
+eval set -- "$ARGS"
+unset ARGS
+while true; do
+    case $1 in
+        '-m'|'--mdin')
+            mdin=$2
+            shift 2
+            continue
+        ;;
+        '-p'|'--protocol')
+            protocol=$2
+            shift 2
+            continue
+        ;;
+        '-t'|'--to')
+            to=$2
+            shift 2
+            continue
+        ;;
+        '--')
+            shift
+            break
+        ;;
+        '')
+            usage
+            exit 0
+        ;;
+        *)
+            echo "Internal error" >&2
+            exit 1
+        ;;
+    esac
+done
+
+[ $AMU_HOME ] || { echo "AMU_HOME not set. Exiting." ; exit ; }
+
+[ "$protocol" ] || { 
+   echo "protocol file not supplied." ; 
+   usage ;
+   exit 1; 
+}
+
+source $AMU_HOME/ambermd_util.bash
+
+last=$(amu_protocol_rm_comment $protocol | tail -n 1 | awk '{print $1}' | egrep -o '[1-9][0-9]*' )
+num=$(( last + 1 ))
+s="steps $((last + 1)) to $to"
+if [ -z $to ] ; then
+    s="one step"
+    to=$num
+fi
+( 
+    for (( ; num < $((to + 1)) ; num=$((num + 1)) )) { 
+        echo -e "$(printf %d $num)\t${mdin}\t# added `date +%Y/%m/%d`" >> $protocol || exit 1
+        mdin=""
+    }
+)
+if  [ ! $num -gt $to ] ; then
+    if [ $? -eq 0 ] ; then
+        echo -n "Added $s on the protocol file $protocol"
+        if [ "$mdin" ] ; then echo -n " using mdin file $mdin" ; fi
+        echo
+    else
+        echo "Error on adding step ${num}. Exiting." >&2
+    fi
+else
+    echo "First step to add is $num but --to=${to}. Exiting."
+fi

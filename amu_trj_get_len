@@ -1,0 +1,24 @@
+#!/bin/bash
+mdo=${1:-mdout}
+md=${2:-mdcrd.nc}
+unit=${3:-10}
+
+function usage() {
+   echo "`basename $0` [mdout] [mdcrd.nc] [unit]"
+   echo "default unit of output is 10 ps"
+}
+
+[ $AMU_HOME ] || { echo  "AMU_HOME not set." ; exit ; }
+source $AMU_HOME/ambermd_util.bash
+
+[ -f $mdo ] || { usage ; exit ; }
+
+frames=$(ncdump -h $md 2> /dev/null | grep "frame =" | head -n 1 | egrep -o '[0-9][0-9]*' ) 
+dt=$(printf %s "$( amu_trj_get_dt $mdo $md 1 | awk '{print $1}' )" )
+
+if [ -n "$dt" ] && [ "$frames" ] ; then
+    len=`python3 -c "print(int($frames * $dt / $unit) )"`
+    echo "$len * $unit ps" 
+else
+    exit 1
+fi

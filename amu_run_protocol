@@ -1,0 +1,42 @@
+#!/bin/bash
+
+[ $AMU_HOME ] || { echo "AMU_HOME not set. Exiting." ; exit ; }
+
+f=$1
+num=$2
+i=0
+
+[ $f ] || { echo -e "No stack file given. Exiting.\nusage: $(basename $0) <protocol> [num_steps]" ; exit ; }
+
+
+source $AMU_HOME/ambermd_util.bash
+
+ret="0"
+mdin=""
+while [[ `amu_protocol_clean $f | wc -l` -gt 0 ]] ; do
+r=`amu_protocol_clean $f | head -n 1 | sed 's/#.*$//'`
+newmdin=`echo $r  | awk '{print $2}' | sed -e "s/#.*//"` 
+r=`echo $r | awk '{print $1}'`
+[ $newmdin ] && { mdin=$newmdin ; echo $mdin ; }
+if [ ! -d $r ] ; then
+    if [ ! $mdin ]; then
+        mdin=`tac $f | awk '{print $2}' | tr -d '\t' | sed -e "s/#.*$//" -e "/^[\s\t]*$/d"  | head -n 1`
+    fi
+    if [ -z $mdin ]; then
+            echo "Don't know how to run $r, make it manually, match a mdin file to $r in $f, or provide a previous step with a known mdin file. Exiting."
+            exit 1
+    fi
+    amu_make_step $mdin
+fi
+[ -f ${f}.log ] && sed -i "/\s\+$r\s/d" ${f}.log
+amu_run_step $r | tee >( grep $r >> ${f}.log )
+
+ret=${PIPESTATUS[0]}
+[[ $ret -eq 0 ]] || break ;
+sed -i "s/^\s*\(\<${r}\>.*\)$/|\1/" $f
+i=$(( i+1 ))
+if [ ${num} ] && [ "${i}" -eq "${num}" ] ; then break ; fi
+sleep 2
+done
+[[ $ret -eq 0 ]] || echo "Stack failed."
+exit $ret
