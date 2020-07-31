@@ -2,10 +2,11 @@
 s=$1
 stride=$2
 strp=$3
-raw=$4
+name=$4
+raw=$5
 
 function usage() {
-   echo "`basename $0` <dir> <stride> <mask>"
+   echo "`basename $0` <dir> <stride> <mask> <mask-name> [raw]"
 }
 
 [ $s ] || { usage ; exit ; }
@@ -47,6 +48,7 @@ if [ -z "$strp" ] ; then
 :
 elif [ "$strp" == "all" ] ; then
 	strp=""
+	name="all"
 fi
 
 interval=`sed -n "s/^.*\<ntwx\>\s\+=\s\+\([1-9][0-9]*\).*$/\1/p" $mdo`
@@ -58,12 +60,12 @@ frame_time_ps=""
       frame_time_ps_name="${frame_time_ps}_ps-" ;
 }
 dostrip=""
-strp_name="all"
+strp_name=$name
 doparmstrp=""
 newparm=""
 [ "$strp" ] && { 
    dostrip="strip $strp" ; 
-   strp_name="${strp}_rm" ; 
+   strp_name="$name" ; 
    newparm="inpcrd-${strp_name}.parm7" ;
    newinp="inpcrd-${strp_name}.rst7" ;
    [ -f "$newparm" ] || doparmwr="parmwrite out $newparm" ;
